@@ -59,7 +59,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
-            print('file_name in CityscapesInstanceEvaluator', file_name)
+            #print('file_name in CityscapesInstanceEvaluator', file_name)
             basename = os.path.splitext(os.path.basename(file_name))[0]
             pred_txt = os.path.join(self._temp_dir, basename + "_pred.txt")
 
@@ -115,8 +115,10 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
             cityscapes_eval.args.groundTruthSearch
         )
         predictionImgList = []
+        wanted = 'frankfurt'
         for gt in groundTruthImgList:
-            print('gt', gt)
+            if gt.split('/')[4] != wanted:
+                continue
             predictionImgList.append(cityscapes_eval.getPrediction(gt, cityscapes_eval.args))
         results = cityscapes_eval.evaluateImgLists(
             predictionImgList, groundTruthImgList, cityscapes_eval.args
@@ -143,7 +145,7 @@ class CityscapesSemSegEvaluator(CityscapesEvaluator):
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
-            print('file_name in CityscapesSemSegEvaluator', file_name)
+            #print('file_name in CityscapesSemSegEvaluator', file_name)
             basename = os.path.splitext(os.path.basename(file_name))[0]
             pred_filename = os.path.join(self._temp_dir, basename + "_pred.png")
 
