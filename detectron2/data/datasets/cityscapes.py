@@ -30,11 +30,11 @@ def _get_cityscapes_files(image_dir, gt_dir):
     cities = PathManager.ls(image_dir)
     logger.info(f"{len(cities)} cities found in '{image_dir}'.")
     print('len cities', len(cities))
-    for city in cities:
-        print('city', city)
-        wanted = 'berlin'
-        if city != wanted:
-            continue
+    # for city in cities:
+    #     print('city', city)
+    #     wanted = 'berlin'
+    #     if city != wanted:
+    #         continue
         city_img_dir = os.path.join(image_dir, city)
         city_gt_dir = os.path.join(gt_dir, city)
         for basename in PathManager.ls(city_img_dir):
@@ -73,6 +73,8 @@ def load_cityscapes_instances(image_dir, gt_dir, from_json=True, to_polygons=Tru
             "Cityscapes's json annotations are in polygon format. "
             "Converting to mask format is not supported now."
         )
+
+    print('image_dir, gt_dir', image_dir, gt_dir))
     files = _get_cityscapes_files(image_dir, gt_dir)
 
     logger.info("Preprocessing cityscapes annotations ...")
