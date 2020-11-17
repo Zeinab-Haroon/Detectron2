@@ -32,7 +32,7 @@ def _get_cityscapes_files(image_dir, gt_dir):
     print('len cities', len(cities))
     for city in cities:
         print('city', city)
-        wanted = 'berlin'
+        wanted = 'frankfurt'
         if city != wanted:
             continue
         city_img_dir = os.path.join(image_dir, city)
