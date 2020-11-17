@@ -74,7 +74,7 @@ def load_cityscapes_instances(image_dir, gt_dir, from_json=True, to_polygons=Tru
             "Converting to mask format is not supported now."
         )
 
-    print('image_dir, gt_dir', image_dir, gt_dir))
+    print('image_dir, gt_dir', image_dir, gt_dir)
     files = _get_cityscapes_files(image_dir, gt_dir)
 
     logger.info("Preprocessing cityscapes annotations ...")
