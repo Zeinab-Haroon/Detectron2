@@ -116,6 +116,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
         )
         predictionImgList = []
         for gt in groundTruthImgList:
+            print('gt', gt)
             predictionImgList.append(cityscapes_eval.getPrediction(gt, cityscapes_eval.args))
         results = cityscapes_eval.evaluateImgLists(
             predictionImgList, groundTruthImgList, cityscapes_eval.args
