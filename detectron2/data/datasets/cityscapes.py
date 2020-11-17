@@ -30,7 +30,7 @@ def _get_cityscapes_files(image_dir, gt_dir):
     cities = PathManager.ls(image_dir)
     logger.info(f"{len(cities)} cities found in '{image_dir}'.")
     print('len cities', len(cities))
-    # for city in cities:
+    for city in cities:
     #     print('city', city)
     #     wanted = 'berlin'
     #     if city != wanted:
