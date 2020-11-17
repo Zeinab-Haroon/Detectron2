@@ -59,6 +59,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
+            print('file_name in CityscapesInstanceEvaluator', file_name)
             basename = os.path.splitext(os.path.basename(file_name))[0]
             pred_txt = os.path.join(self._temp_dir, basename + "_pred.txt")
 
@@ -141,6 +142,7 @@ class CityscapesSemSegEvaluator(CityscapesEvaluator):
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
+            print('file_name in CityscapesSemSegEvaluator', file_name)
             basename = os.path.splitext(os.path.basename(file_name))[0]
             pred_filename = os.path.join(self._temp_dir, basename + "_pred.png")
 
