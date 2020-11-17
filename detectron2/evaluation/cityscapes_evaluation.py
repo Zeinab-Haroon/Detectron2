@@ -115,7 +115,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
             cityscapes_eval.args.groundTruthSearch
         )
         predictionImgList = []
-        wanted = 'frankfurt'
+        wanted = 'berlin'
         for gt in groundTruthImgList:
             if gt.split('/')[4] != wanted:
                 continue
