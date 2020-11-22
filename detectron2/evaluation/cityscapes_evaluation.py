@@ -59,7 +59,6 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
-            #print('file_name in CityscapesInstanceEvaluator', file_name)
             basename = os.path.splitext(os.path.basename(file_name))[0]
             pred_txt = os.path.join(self._temp_dir, basename + "_pred.txt")
 
@@ -108,24 +107,29 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
         # These lines are adopted from
         # https://github.com/mcordts/cityscapesScripts/blob/master/cityscapesscripts/evaluation/evalInstanceLevelSemanticLabeling.py # noqa
         gt_dir = PathManager.get_local_path(self._metadata.gt_dir)
-        groundTruthImgList = glob.glob(os.path.join(gt_dir, "*", "*_gtFine_instanceIds.png"))
+        
+        print('==================== ** ======================')
+        # wanted = 'lindau'
+        # wanted = 'munster'
+        wanted = 'frankfurt'
+        # groundTruthImgList = glob.glob(os.path.join(gt_dir, "*", "*_gtFine_instanceIds.png"))
+        groundTruthImgList = glob.glob(os.path.join(gt_dir, wanted, "*_gtFine_instanceIds.png"))
+
         assert len(
             groundTruthImgList
         ), "Cannot find any ground truth images to use for evaluation. Searched for: {}".format(
             cityscapes_eval.args.groundTruthSearch
         )
         predictionImgList = []
-        wanted = 'frankfurt'
         for gt in groundTruthImgList:
-            if gt.split('/')[4] != wanted:
-                continue
             predictionImgList.append(cityscapes_eval.getPrediction(gt, cityscapes_eval.args))
         results = cityscapes_eval.evaluateImgLists(
             predictionImgList, groundTruthImgList, cityscapes_eval.args
         )["averages"]
 
         ret = OrderedDict()
-        ret["segm"] = {"AP": results["allAp"] * 100, "AP50": results["allAp50%"] * 100}
+        print('ret["segm"]:', ret["segm"])
+
         self._working_dir.cleanup()
         return ret
 
@@ -145,7 +149,6 @@ class CityscapesSemSegEvaluator(CityscapesEvaluator):
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
-            #print('file_name in CityscapesSemSegEvaluator', file_name)
             basename = os.path.splitext(os.path.basename(file_name))[0]
             pred_filename = os.path.join(self._temp_dir, basename + "_pred.png")
 
