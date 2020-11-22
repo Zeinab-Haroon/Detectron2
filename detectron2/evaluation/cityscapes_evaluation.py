@@ -109,9 +109,9 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
         gt_dir = PathManager.get_local_path(self._metadata.gt_dir)
         
         print('==================== ** ======================')
-        # wanted = 'lindau'
+        wanted = 'lindau'
         # wanted = 'munster'
-        wanted = 'frankfurt'
+        # wanted = 'frankfurt'
         # groundTruthImgList = glob.glob(os.path.join(gt_dir, "*", "*_gtFine_instanceIds.png"))
         groundTruthImgList = glob.glob(os.path.join(gt_dir, wanted, "*_gtFine_instanceIds.png"))
 
