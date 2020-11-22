@@ -33,8 +33,8 @@ def _get_cityscapes_files(image_dir, gt_dir):
     print('len cities', len(cities))
     for city in cities:
         print('city', city)
-        wanted = 'lindau'
-        # wanted = 'munster'
+        # wanted = 'lindau'
+        wanted = 'munster'
         # wanted = 'frankfurt'
         if city != wanted:
             continue
