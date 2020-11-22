@@ -29,9 +29,12 @@ def _get_cityscapes_files(image_dir, gt_dir):
     # scan through the directory
     cities = PathManager.ls(image_dir)
     logger.info(f"{len(cities)} cities found in '{image_dir}'.")
+    print('=====================================')
     print('len cities', len(cities))
     for city in cities:
         print('city', city)
+        # wanted = 'lindau'
+        # wanted = 'munster'
         wanted = 'frankfurt'
         if city != wanted:
             continue
@@ -49,6 +52,7 @@ def _get_cityscapes_files(image_dir, gt_dir):
             json_file = os.path.join(city_gt_dir, basename + "gtFine_polygons.json")
 
             files.append((image_file, instance_file, label_file, json_file))
+    print('Files found :', len(files))
     assert len(files), "No images found in {}".format(image_dir)
     for f in files[0]:
         assert PathManager.isfile(f), f
