@@ -1,5 +1,7 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 
+# pyre-unsafe
+
 import numpy as np
 from typing import Dict, List, Optional
 import fvcore.nn.weight_init as weight_init
@@ -15,6 +17,7 @@ from detectron2.structures import ImageList, Instances
 
 from .. import (
     build_densepose_data_filter,
+    build_densepose_embedder,
     build_densepose_head,
     build_densepose_losses,
     build_densepose_predictor,
@@ -46,7 +49,10 @@ class Decoder(nn.Module):
         for in_feature in self.in_features:
             head_ops = []
             head_length = max(
-                1, int(np.log2(feature_strides[in_feature]) - np.log2(self.common_stride))
+                1,
+                # pyre-fixme[6]: For 1st argument expected `Union[bytes, complex,
+                #  float, int, generic, str]` but got `Optional[int]`.
+                int(np.log2(feature_strides[in_feature]) - np.log2(self.common_stride)),
             )
             for k in range(head_length):
                 conv = Conv2d(
@@ -121,6 +127,7 @@ class DensePoseROIHeads(StandardROIHeads):
             cfg, self.densepose_head.n_out_channels
         )
         self.densepose_losses = build_densepose_losses(cfg)
+        self.embedder = build_densepose_embedder(cfg)
 
     def _forward_densepose(self, features: Dict[str, torch.Tensor], instances: List[Instances]):
         """
@@ -143,28 +150,32 @@ class DensePoseROIHeads(StandardROIHeads):
         if not self.densepose_on:
             return {} if self.training else instances
 
-        features = [features[f] for f in self.in_features]
+        features_list = [features[f] for f in self.in_features]
         if self.training:
             proposals, _ = select_foreground_proposals(instances, self.num_classes)
-            features, proposals = self.densepose_data_filter(features, proposals)
+            features_list, proposals = self.densepose_data_filter(features_list, proposals)
             if len(proposals) > 0:
                 proposal_boxes = [x.proposal_boxes for x in proposals]
 
                 if self.use_decoder:
-                    features = [self.decoder(features)]
+                    # pyre-fixme[29]: `Union[Module, Tensor]` is not a function.
+                    features_list = [self.decoder(features_list)]
 
-                features_dp = self.densepose_pooler(features, proposal_boxes)
+                features_dp = self.densepose_pooler(features_list, proposal_boxes)
                 densepose_head_outputs = self.densepose_head(features_dp)
                 densepose_predictor_outputs = self.densepose_predictor(densepose_head_outputs)
-                densepose_loss_dict = self.densepose_losses(proposals, densepose_predictor_outputs)
+                densepose_loss_dict = self.densepose_losses(
+                    proposals, densepose_predictor_outputs, embedder=self.embedder
+                )
                 return densepose_loss_dict
         else:
             pred_boxes = [x.pred_boxes for x in instances]
 
             if self.use_decoder:
-                features = [self.decoder(features)]
+                # pyre-fixme[29]: `Union[Module, Tensor]` is not a function.
+                features_list = [self.decoder(features_list)]
 
-            features_dp = self.densepose_pooler(features, pred_boxes)
+            features_dp = self.densepose_pooler(features_list, pred_boxes)
             if len(features_dp) > 0:
                 densepose_head_outputs = self.densepose_head(features_dp)
                 densepose_predictor_outputs = self.densepose_predictor(densepose_head_outputs)

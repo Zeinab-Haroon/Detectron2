@@ -1,14 +1,16 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 
+# pyre-unsafe
+
 from typing import List
 import torch
 
 from detectron2.config import CfgNode
 from detectron2.structures import Instances
-from detectron2.structures.boxes import matched_boxlist_iou
+from detectron2.structures.boxes import matched_pairwise_iou
 
 
-class DensePoseDataFilter(object):
+class DensePoseDataFilter:
     def __init__(self, cfg: CfgNode):
         self.iou_threshold = cfg.MODEL.ROI_DENSEPOSE_HEAD.FG_IOU_THRESHOLD
         self.keep_masks = cfg.MODEL.ROI_DENSEPOSE_HEAD.COARSE_SEGM_TRAINED_BY_MASKS
@@ -52,9 +54,9 @@ class DensePoseDataFilter(object):
             gt_boxes = proposals_per_image.gt_boxes
             est_boxes = proposals_per_image.proposal_boxes
             # apply match threshold for densepose head
-            iou = matched_boxlist_iou(gt_boxes, est_boxes)
+            iou = matched_pairwise_iou(gt_boxes, est_boxes)
             iou_select = iou > self.iou_threshold
-            proposals_per_image = proposals_per_image[iou_select]
+            proposals_per_image = proposals_per_image[iou_select]  # pyre-ignore[6]
 
             N_gt_boxes = len(proposals_per_image.gt_boxes)
             assert N_gt_boxes == len(proposals_per_image.proposal_boxes), (
@@ -86,7 +88,7 @@ class DensePoseDataFilter(object):
             #     feature_mask[i] = 0
             #     continue
             if len(selected_indices) != N_gt_boxes:
-                proposals_per_image = proposals_per_image[selected_indices]
+                proposals_per_image = proposals_per_image[selected_indices]  # pyre-ignore[6]
             assert len(proposals_per_image.gt_boxes) == len(proposals_per_image.proposal_boxes)
             proposals_filtered.append(proposals_per_image)
         # features_filtered = [feature[feature_mask] for feature in features]

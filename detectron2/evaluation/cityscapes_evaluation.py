@@ -36,6 +36,9 @@ class CityscapesEvaluator(DatasetEvaluator):
         self._temp_dir = self._working_dir.name
         # All workers will write to the same results directory
         # TODO this does not work in distributed training
+        assert (
+            comm.get_local_size() == comm.get_world_size()
+        ), "CityscapesEvaluator currently do not work with multiple machines."
         self._temp_dir = comm.all_gather(self._temp_dir)[0]
         if self._temp_dir != self._working_dir.name:
             self._working_dir.cleanup()
@@ -55,7 +58,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
     """
 
     def process(self, inputs, outputs):
-        from cityscapesscripts.helpers.labels import name2label
+        from deeplearning.projects.cityscapesApi.cityscapesscripts.helpers.labels import name2label
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
@@ -93,7 +96,7 @@ class CityscapesInstanceEvaluator(CityscapesEvaluator):
         comm.synchronize()
         if comm.get_rank() > 0:
             return
-        import cityscapesscripts.evaluation.evalInstanceLevelSemanticLabeling as cityscapes_eval
+        import deeplearning.projects.cityscapesApi.cityscapesscripts.evaluation.evalInstanceLevelSemanticLabeling as cityscapes_eval, deeplearning.projects.cityscapesApi.cityscapesscripts.evaluation.evalInstanceLevelSemanticLabeling
 
         self._logger.info("Evaluating results under {} ...".format(self._temp_dir))
 
@@ -145,7 +148,7 @@ class CityscapesSemSegEvaluator(CityscapesEvaluator):
     """
 
     def process(self, inputs, outputs):
-        from cityscapesscripts.helpers.labels import trainId2label
+        from deeplearning.projects.cityscapesApi.cityscapesscripts.helpers.labels import trainId2label
 
         for input, output in zip(inputs, outputs):
             file_name = input["file_name"]
@@ -166,7 +169,7 @@ class CityscapesSemSegEvaluator(CityscapesEvaluator):
             return
         # Load the Cityscapes eval script *after* setting the required env var,
         # since the script reads CITYSCAPES_DATASET into global variables at load time.
-        import cityscapesscripts.evaluation.evalPixelLevelSemanticLabeling as cityscapes_eval
+        import deeplearning.projects.cityscapesApi.cityscapesscripts.evaluation.evalPixelLevelSemanticLabeling as cityscapes_eval, deeplearning.projects.cityscapesApi.cityscapesscripts.evaluation.evalPixelLevelSemanticLabeling
 
         self._logger.info("Evaluating results under {} ...".format(self._temp_dir))
 

@@ -1,4 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
+
+# pyre-unsafe
 import math
 from typing import Any, List
 import torch
@@ -11,12 +13,12 @@ from detectron2.structures import Instances
 from .. import DensePoseConfidenceModelConfig, DensePoseUVConfidenceType
 from .chart import DensePoseChartLoss
 from .registry import DENSEPOSE_LOSS_REGISTRY
-from .utils import BilinearInterpolationHelper, LossDict, SingleTensorsHelper
+from .utils import BilinearInterpolationHelper, LossDict
 
 
 @DENSEPOSE_LOSS_REGISTRY.register()
 class DensePoseChartWithConfidenceLoss(DensePoseChartLoss):
-    """"""
+    """ """
 
     def __init__(self, cfg: CfgNode):
         super().__init__(cfg)
@@ -72,24 +74,19 @@ class DensePoseChartWithConfidenceLoss(DensePoseChartLoss):
         self,
         proposals_with_gt: List[Instances],
         densepose_predictor_outputs: Any,
-        tensors_helper: SingleTensorsHelper,
+        packed_annotations: Any,
         interpolator: BilinearInterpolationHelper,
         j_valid_fg: torch.Tensor,
     ) -> LossDict:
         conf_type = self.confidence_model_cfg.uv_confidence.type
         if self.confidence_model_cfg.uv_confidence.enabled:
-            u_gt = tensors_helper.u_gt[j_valid_fg]
-            u_est = interpolator.extract_at_points(
-                densepose_predictor_outputs.u[tensors_helper.index_with_dp]
-            )[j_valid_fg]
-
-            v_gt = tensors_helper.v_gt[j_valid_fg]
-            v_est = interpolator.extract_at_points(
-                densepose_predictor_outputs.v[tensors_helper.index_with_dp]
-            )[j_valid_fg]
-            sigma_2_est = interpolator.extract_at_points(
-                densepose_predictor_outputs.sigma_2[tensors_helper.index_with_dp]
-            )[j_valid_fg]
+            u_gt = packed_annotations.u_gt[j_valid_fg]
+            u_est = interpolator.extract_at_points(densepose_predictor_outputs.u)[j_valid_fg]
+            v_gt = packed_annotations.v_gt[j_valid_fg]
+            v_est = interpolator.extract_at_points(densepose_predictor_outputs.v)[j_valid_fg]
+            sigma_2_est = interpolator.extract_at_points(densepose_predictor_outputs.sigma_2)[
+                j_valid_fg
+            ]
             if conf_type == DensePoseUVConfidenceType.IID_ISO:
                 return {
                     "loss_densepose_UV": (
@@ -98,12 +95,12 @@ class DensePoseChartWithConfidenceLoss(DensePoseChartLoss):
                     )
                 }
             elif conf_type in [DensePoseUVConfidenceType.INDEP_ANISO]:
-                kappa_u_est = interpolator.extract_at_points(
-                    densepose_predictor_outputs.kappa_u[tensors_helper.index_with_dp]
-                )[j_valid_fg]
-                kappa_v_est = interpolator.extract_at_points(
-                    densepose_predictor_outputs.kappa_v[tensors_helper.index_with_dp]
-                )[j_valid_fg]
+                kappa_u_est = interpolator.extract_at_points(densepose_predictor_outputs.kappa_u)[
+                    j_valid_fg
+                ]
+                kappa_v_est = interpolator.extract_at_points(densepose_predictor_outputs.kappa_v)[
+                    j_valid_fg
+                ]
                 return {
                     "loss_densepose_UV": (
                         self.uv_loss_with_confidences(
@@ -112,14 +109,13 @@ class DensePoseChartWithConfidenceLoss(DensePoseChartLoss):
                         * self.w_points
                     )
                 }
-        else:
-            return super().produce_densepose_losses_uv(
-                proposals_with_gt,
-                densepose_predictor_outputs,
-                tensors_helper,
-                interpolator,
-                j_valid_fg,
-            )
+        return super().produce_densepose_losses_uv(
+            proposals_with_gt,
+            densepose_predictor_outputs,
+            packed_annotations,
+            interpolator,
+            j_valid_fg,
+        )
 
 
 class IIDIsotropicGaussianUVLoss(nn.Module):
@@ -153,6 +149,7 @@ class IIDIsotropicGaussianUVLoss(nn.Module):
         # (sigma -> 0)
         sigma2 = F.softplus(sigma_u) + self.sigma_lower_bound
         # compute \|delta_i\|^2
+        # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
         delta_t_delta = (u - target_u) ** 2 + (v - target_v) ** 2
         # the total loss from the formula above:
         loss = 0.5 * (self.log2pi + 2 * torch.log(sigma2) + delta_t_delta / sigma2)
@@ -193,17 +190,20 @@ class IndepAnisotropicGaussianUVLoss(nn.Module):
         # compute $\sigma_i^2$
         sigma2 = F.softplus(sigma_u) + self.sigma_lower_bound
         # compute \|r_i\|^2
-        r_sqnorm2 = kappa_u_est ** 2 + kappa_v_est ** 2
+        # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
+        r_sqnorm2 = kappa_u_est**2 + kappa_v_est**2
         delta_u = u - target_u
         delta_v = v - target_v
         # compute \|delta_i\|^2
-        delta_sqnorm = delta_u ** 2 + delta_v ** 2
+        # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
+        delta_sqnorm = delta_u**2 + delta_v**2
         delta_u_r_u = delta_u * kappa_u_est
         delta_v_r_v = delta_v * kappa_v_est
         # compute the scalar product <delta_i, r_i>
         delta_r = delta_u_r_u + delta_v_r_v
         # compute squared scalar product <delta_i, r_i>^2
-        delta_r_sqnorm = delta_r ** 2
+        # pyre-fixme[58]: `**` is not supported for operand types `Tensor` and `int`.
+        delta_r_sqnorm = delta_r**2
         denom2 = sigma2 * (sigma2 + r_sqnorm2)
         loss = 0.5 * (
             self.log2pi + torch.log(denom2) + delta_sqnorm / sigma2 - delta_r_sqnorm / denom2

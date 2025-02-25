@@ -1,3 +1,4 @@
+# Copyright (c) Facebook, Inc. and its affiliates.
 # ------------------------------------------------------------------------------
 # Copyright (c) Microsoft
 # Licensed under the MIT License.
@@ -5,6 +6,8 @@
 # Modified by Bowen Cheng (bcheng9@illinois.edu)
 # Adapted from https://github.com/HRNet/Higher-HRNet-Human-Pose-Estimation/blob/master/lib/models/pose_higher_hrnet.py  # noqa
 # ------------------------------------------------------------------------------
+
+# pyre-unsafe
 
 from __future__ import absolute_import, division, print_function
 import logging

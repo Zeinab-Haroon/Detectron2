@@ -1,12 +1,13 @@
 #!/bin/bash -e
 # Copyright (c) Facebook, Inc. and its affiliates.
 
-# Run this script at project root by "./dev/linter.sh" before you commit
+# cd to detectron2 project root
+cd "$(dirname "${BASH_SOURCE[0]}")/.."
 
 {
-  black --version | grep -E "20.8b1" > /dev/null
+  black --version | grep -E "24\." > /dev/null
 } || {
-  echo "Linter requires 'black==20.8b1' !"
+  echo "Linter requires 'black==24.*' !"
   exit 1
 }
 
@@ -25,8 +26,8 @@ echo "Running black ..."
 black -l 100 .
 
 echo "Running flake8 ..."
-if [ -x "$(command -v flake8-3)" ]; then
-  flake8-3 .
+if [ -x "$(command -v flake8)" ]; then
+  flake8 .
 else
   python3 -m flake8 .
 fi

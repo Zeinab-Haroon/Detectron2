@@ -86,7 +86,10 @@ class GenericMask:
 
         if isinstance(m, np.ndarray):  # assumed to be a binary mask
             assert m.shape[1] != 2, m.shape
-            assert m.shape == (height, width), m.shape
+            assert m.shape == (
+                height,
+                width,
+            ), f"mask shape: {m.shape}, target dims: {height}, {width}"
             self._mask = m.astype("uint8")
             return
 
@@ -150,6 +153,10 @@ class GenericMask:
 
 
 class _PanopticPrediction:
+    """
+    Unify different panoptic annotation/prediction formats
+    """
+
     def __init__(self, panoptic_seg, segments_info, metadata=None):
         if segments_info is None:
             assert metadata is not None
@@ -200,7 +207,7 @@ class _PanopticPrediction:
         assert (
             len(empty_ids) == 1
         ), ">1 ids corresponds to no labels. This is currently not supported"
-        return (self._seg != empty_ids[0]).numpy().astype(np.bool)
+        return (self._seg != empty_ids[0]).numpy().astype(bool)
 
     def semantic_masks(self):
         for sid in self._seg_ids:
@@ -208,36 +215,42 @@ class _PanopticPrediction:
             if sinfo is None or sinfo["isthing"]:
                 # Some pixels (e.g. id 0 in PanopticFPN) have no instance or semantic predictions.
                 continue
-            yield (self._seg == sid).numpy().astype(np.bool), sinfo
+            yield (self._seg == sid).numpy().astype(bool), sinfo
 
     def instance_masks(self):
         for sid in self._seg_ids:
             sinfo = self._sinfo.get(sid)
             if sinfo is None or not sinfo["isthing"]:
                 continue
-            mask = (self._seg == sid).numpy().astype(np.bool)
+            mask = (self._seg == sid).numpy().astype(bool)
             if mask.sum() > 0:
                 yield mask, sinfo
 
 
-def _create_text_labels(classes, scores, class_names):
+def _create_text_labels(classes, scores, class_names, is_crowd=None):
     """
     Args:
         classes (list[int] or None):
         scores (list[float] or None):
         class_names (list[str] or None):
+        is_crowd (list[bool] or None):
 
     Returns:
         list[str] or None
     """
     labels = None
-    if classes is not None and class_names is not None and len(class_names) > 0:
-        labels = [class_names[i] for i in classes]
+    if classes is not None:
+        if class_names is not None and len(class_names) > 0:
+            labels = [class_names[i] for i in classes]
+        else:
+            labels = [str(i) for i in classes]
     if scores is not None:
         if labels is None:
             labels = ["{:.0f}%".format(s * 100) for s in scores]
         else:
             labels = ["{} {:.0f}%".format(l, s * 100) for l, s in zip(labels, scores)]
+    if labels is not None and is_crowd is not None:
+        labels = [l + ("|crowd" if crowd else "") for l, crowd in zip(labels, is_crowd)]
     return labels
 
 
@@ -245,7 +258,7 @@ class VisImage:
     def __init__(self, img, scale=1.0):
         """
         Args:
-            img (ndarray): an RGB image of shape (H, W, 3).
+            img (ndarray): an RGB image of shape (H, W, 3) in range [0, 255].
             scale (float): scale the input image
         """
         self.img = img
@@ -274,11 +287,17 @@ class VisImage:
         # self.canvas = mpl.backends.backend_cairo.FigureCanvasCairo(fig)
         ax = fig.add_axes([0.0, 0.0, 1.0, 1.0])
         ax.axis("off")
-        # Need to imshow this first so that other patches can be drawn on top
-        ax.imshow(img, extent=(0, self.width, self.height, 0), interpolation="nearest")
-
         self.fig = fig
         self.ax = ax
+        self.reset_image(img)
+
+    def reset_image(self, img):
+        """
+        Args:
+            img: same as in __init__
+        """
+        img = img.astype("uint8")
+        self.ax.imshow(img, extent=(0, self.width, self.height, 0), interpolation="nearest")
 
     def save(self, filepath):
         """
@@ -322,8 +341,12 @@ class Visualizer:
     Style such as color, opacity, label contents, visibility of labels, or even the visibility
     of objects themselves (e.g. when the object is too small) may change according
     to different heuristics, as long as the results still look visually reasonable.
-    To obtain a consistent style, implement custom drawing functions with the primitive
-    methods instead.
+
+    To obtain a consistent style, you can implement custom drawing functions with the
+    abovementioned primitive methods instead. If you need more customized visualization
+    styles, you can process the data yourself following their format documented in
+    tutorials (:doc:`/tutorials/models`, :doc:`/tutorials/datasets`). This class does not
+    intend to satisfy everyone's preference on drawing styles.
 
     This visualizer focuses on high rendering quality rather than performance. It is not
     designed to be used for real-time applications.
@@ -331,7 +354,9 @@ class Visualizer:
 
     # TODO implement a fast, rasterized version using OpenCV
 
-    def __init__(self, img_rgb, metadata=None, scale=1.0, instance_mode=ColorMode.IMAGE):
+    def __init__(
+        self, img_rgb, metadata=None, scale=1.0, instance_mode=ColorMode.IMAGE, font_size_scale=1.0
+    ):
         """
         Args:
             img_rgb: a numpy array of shape (H, W, C), where H and W correspond to
@@ -339,9 +364,10 @@ class Visualizer:
                 color channels. The image is required to be in RGB format since that
                 is a requirement of the Matplotlib library. The image is also expected
                 to be in the range [0, 255].
-            metadata (Metadata): image metadata.
+            metadata (Metadata): dataset metadata (e.g. class names and colors)
             instance_mode (ColorMode): defines one of the pre-defined style for drawing
                 instances on an image.
+            font_size_scale: extra scaling of font size on top of default font size
         """
         self.img = np.asarray(img_rgb).clip(0, 255).astype(np.uint8)
         if metadata is None:
@@ -351,12 +377,14 @@ class Visualizer:
         self.cpu_device = torch.device("cpu")
 
         # too small texts are useless, therefore clamp to 9
-        self._default_font_size = max(
-            np.sqrt(self.output.height * self.output.width) // 90, 10 // scale
+        self._default_font_size = (
+            max(np.sqrt(self.output.height * self.output.width) // 90, 10 // scale)
+            * font_size_scale
         )
         self._instance_mode = instance_mode
+        self.keypoint_threshold = _KEYPOINT_THRESHOLD
 
-    def draw_instance_predictions(self, predictions):
+    def draw_instance_predictions(self, predictions, jittering: bool = True):
         """
         Draw instance-level prediction results on an image.
 
@@ -364,13 +392,15 @@ class Visualizer:
             predictions (Instances): the output of an instance detection/segmentation
                 model. Following fields will be used to draw:
                 "pred_boxes", "pred_classes", "scores", "pred_masks" (or "pred_masks_rle").
+            jittering: if True, in color mode SEGMENTATION, randomly jitter the colors per class
+                to distinguish instances from the same class
 
         Returns:
             output (VisImage): image object with visualizations.
         """
         boxes = predictions.pred_boxes if predictions.has("pred_boxes") else None
         scores = predictions.scores if predictions.has("scores") else None
-        classes = predictions.pred_classes if predictions.has("pred_classes") else None
+        classes = predictions.pred_classes.tolist() if predictions.has("pred_classes") else None
         labels = _create_text_labels(classes, scores, self.metadata.get("thing_classes", None))
         keypoints = predictions.pred_keypoints if predictions.has("pred_keypoints") else None
 
@@ -381,19 +411,27 @@ class Visualizer:
             masks = None
 
         if self._instance_mode == ColorMode.SEGMENTATION and self.metadata.get("thing_colors"):
-            colors = [
-                self._jitter([x / 255 for x in self.metadata.thing_colors[c]]) for c in classes
-            ]
+            colors = (
+                [self._jitter([x / 255 for x in self.metadata.thing_colors[c]]) for c in classes]
+                if jittering
+                else [
+                    tuple(mplc.to_rgb([x / 255 for x in self.metadata.thing_colors[c]]))
+                    for c in classes
+                ]
+            )
+
             alpha = 0.8
         else:
             colors = None
             alpha = 0.5
 
         if self._instance_mode == ColorMode.IMAGE_BW:
-            self.output.img = self._create_grayscale_image(
-                (predictions.pred_masks.any(dim=0) > 0).numpy()
-                if predictions.has("pred_masks")
-                else None
+            self.output.reset_image(
+                self._create_grayscale_image(
+                    (predictions.pred_masks.any(dim=0) > 0).numpy()
+                    if predictions.has("pred_masks")
+                    else None
+                )
             )
             alpha = 0.3
 
@@ -443,17 +481,17 @@ class Visualizer:
             )
         return self.output
 
-    def draw_panoptic_seg_predictions(
-        self, panoptic_seg, segments_info, area_threshold=None, alpha=0.7
-    ):
+    def draw_panoptic_seg(self, panoptic_seg, segments_info, area_threshold=None, alpha=0.7):
         """
-        Draw panoptic prediction results on an image.
+        Draw panoptic prediction annotations or results.
 
         Args:
             panoptic_seg (Tensor): of shape (height, width) where the values are ids for each
                 segment.
-            segments_info (list[dict]): Describe each segment in `panoptic_seg`.
-                Each dict contains keys "id", "category_id", "isthing".
+            segments_info (list[dict] or None): Describe each segment in `panoptic_seg`.
+                If it is a ``list[dict]``, each dict contains keys "id", "category_id".
+                If None, category id of each pixel is computed by
+                ``pixel // metadata.label_divisor``.
             area_threshold (int): stuff segments with less than `area_threshold` are not drawn.
 
         Returns:
@@ -462,7 +500,7 @@ class Visualizer:
         pred = _PanopticPrediction(panoptic_seg, segments_info, self.metadata)
 
         if self._instance_mode == ColorMode.IMAGE_BW:
-            self.output.img = self._create_grayscale_image(pred.non_empty_mask())
+            self.output.reset_image(self._create_grayscale_image(pred.non_empty_mask()))
 
         # draw mask for all semantic segments first i.e. "stuff"
         for mask, sinfo in pred.semantic_masks():
@@ -493,7 +531,9 @@ class Visualizer:
             scores = [x["score"] for x in sinfo]
         except KeyError:
             scores = None
-        labels = _create_text_labels(category_ids, scores, self.metadata.thing_classes)
+        labels = _create_text_labels(
+            category_ids, scores, self.metadata.thing_classes, [x.get("iscrowd", 0) for x in sinfo]
+        )
 
         try:
             colors = [
@@ -505,9 +545,11 @@ class Visualizer:
 
         return self.output
 
+    draw_panoptic_seg_predictions = draw_panoptic_seg  # backward compatibility
+
     def draw_dataset_dict(self, dic):
         """
-        Draw annotations/segmentaions in Detectron2 Dataset format.
+        Draw annotations/segmentations in Detectron2 Dataset format.
 
         Args:
             dic (dict): annotation/segmentation data of one image, in Detectron2 Dataset format.
@@ -528,25 +570,28 @@ class Visualizer:
                 keypts = None
 
             boxes = [
-                BoxMode.convert(x["bbox"], x["bbox_mode"], BoxMode.XYXY_ABS)
-                if len(x["bbox"]) == 4
-                else x["bbox"]
+                (
+                    BoxMode.convert(x["bbox"], x["bbox_mode"], BoxMode.XYXY_ABS)
+                    if len(x["bbox"]) == 4
+                    else x["bbox"]
+                )
                 for x in annos
             ]
 
-            labels = [x["category_id"] for x in annos]
             colors = None
+            category_ids = [x["category_id"] for x in annos]
             if self._instance_mode == ColorMode.SEGMENTATION and self.metadata.get("thing_colors"):
                 colors = [
-                    self._jitter([x / 255 for x in self.metadata.thing_colors[c]]) for c in labels
+                    self._jitter([x / 255 for x in self.metadata.thing_colors[c]])
+                    for c in category_ids
                 ]
             names = self.metadata.get("thing_classes", None)
-            if names:
-                labels = [names[i] for i in labels]
-            labels = [
-                "{}".format(i) + ("|crowd" if a.get("iscrowd", 0) else "")
-                for i, a in zip(labels, annos)
-            ]
+            labels = _create_text_labels(
+                category_ids,
+                scores=None,
+                class_names=names,
+                is_crowd=[x.get("iscrowd", 0) for x in annos],
+            )
             self.overlay_instances(
                 labels=labels, boxes=boxes, masks=masks, keypoints=keypts, assigned_colors=colors
             )
@@ -561,17 +606,16 @@ class Visualizer:
 
         pan_seg = dic.get("pan_seg", None)
         if pan_seg is None and "pan_seg_file_name" in dic:
-            assert "segments_info" in dic
             with PathManager.open(dic["pan_seg_file_name"], "rb") as f:
                 pan_seg = Image.open(f)
                 pan_seg = np.asarray(pan_seg)
                 from panopticapi.utils import rgb2id
 
                 pan_seg = rgb2id(pan_seg)
-            segments_info = dic["segments_info"]
         if pan_seg is not None:
-            pan_seg = torch.Tensor(pan_seg)
-            self.draw_panoptic_seg_predictions(pan_seg, segments_info, area_threshold=0, alpha=0.5)
+            segments_info = dic["segments_info"]
+            pan_seg = torch.tensor(pan_seg)
+            self.draw_panoptic_seg(pan_seg, segments_info, area_threshold=0, alpha=0.5)
         return self.output
 
     def overlay_instances(
@@ -582,7 +626,7 @@ class Visualizer:
         masks=None,
         keypoints=None,
         assigned_colors=None,
-        alpha=0.5
+        alpha=0.5,
     ):
         """
         Args:
@@ -609,11 +653,10 @@ class Visualizer:
             assigned_colors (list[matplotlib.colors]): a list of colors, where each color
                 corresponds to each mask or box in the image. Refer to 'matplotlib.colors'
                 for full list of formats that the colors are accepted in.
-
         Returns:
             output (VisImage): image object with visualizations.
         """
-        num_instances = None
+        num_instances = 0
         if boxes is not None:
             boxes = self._convert_boxes(boxes)
             num_instances = len(boxes)
@@ -771,9 +814,10 @@ class Visualizer:
         visible = {}
         keypoint_names = self.metadata.get("keypoint_names")
         for idx, keypoint in enumerate(keypoints):
+
             # draw keypoint
             x, y, prob = keypoint
-            if prob > _KEYPOINT_THRESHOLD:
+            if prob > self.keypoint_threshold:
                 self.draw_circle((x, y), color=_RED)
                 if keypoint_names:
                     keypoint_name = keypoint_names[idx]
@@ -825,7 +869,7 @@ class Visualizer:
         font_size=None,
         color="g",
         horizontal_alignment="center",
-        rotation=0
+        rotation=0,
     ):
         """
         Args:
@@ -1003,7 +1047,7 @@ class Visualizer:
         return self.output
 
     def draw_binary_mask(
-        self, binary_mask, color=None, *, edge_color=None, text=None, alpha=0.5, area_threshold=0
+        self, binary_mask, color=None, *, edge_color=None, text=None, alpha=0.5, area_threshold=10
     ):
         """
         Args:
@@ -1014,9 +1058,9 @@ class Visualizer:
                 formats that are accepted. If None, will pick a random color.
             edge_color: color of the polygon edges. Refer to `matplotlib.colors` for a
                 full list of formats that are accepted.
-            text (str): if None, will be drawn in the object's center of mass.
+            text (str): if None, will be drawn on the object
             alpha (float): blending efficient. Smaller values lead to more transparent masks.
-            area_threshold (float): a connected component small than this will not be shown.
+            area_threshold (float): a connected component smaller than this area will not be shown.
 
         Returns:
             output (VisImage): image object with mask drawn.
@@ -1049,18 +1093,36 @@ class Visualizer:
             self.output.ax.imshow(rgba, extent=(0, self.output.width, self.output.height, 0))
 
         if text is not None and has_valid_segment:
-            # TODO sometimes drawn on wrong objects. the heuristics here can improve.
             lighter_color = self._change_color_brightness(color, brightness_factor=0.7)
-            _num_cc, cc_labels, stats, centroids = cv2.connectedComponentsWithStats(binary_mask, 8)
-            largest_component_id = np.argmax(stats[1:, -1]) + 1
+            self._draw_text_in_mask(binary_mask, text, lighter_color)
+        return self.output
 
-            # draw text on the largest component, as well as other very large components.
-            for cid in range(1, _num_cc):
-                if cid == largest_component_id or stats[cid, -1] > _LARGE_MASK_AREA_THRESH:
-                    # median is more stable than centroid
-                    # center = centroids[largest_component_id]
-                    center = np.median((cc_labels == cid).nonzero(), axis=1)[::-1]
-                    self.draw_text(text, center, color=lighter_color)
+    def draw_soft_mask(self, soft_mask, color=None, *, text=None, alpha=0.5):
+        """
+        Args:
+            soft_mask (ndarray): float array of shape (H, W), each value in [0, 1].
+            color: color of the mask. Refer to `matplotlib.colors` for a full list of
+                formats that are accepted. If None, will pick a random color.
+            text (str): if None, will be drawn on the object
+            alpha (float): blending efficient. Smaller values lead to more transparent masks.
+
+        Returns:
+            output (VisImage): image object with mask drawn.
+        """
+        if color is None:
+            color = random_color(rgb=True, maximum=1)
+        color = mplc.to_rgb(color)
+
+        shape2d = (soft_mask.shape[0], soft_mask.shape[1])
+        rgba = np.zeros(shape2d + (4,), dtype="float32")
+        rgba[:, :, :3] = color
+        rgba[:, :, 3] = soft_mask * alpha
+        self.output.ax.imshow(rgba, extent=(0, self.output.width, self.output.height, 0))
+
+        if text is not None:
+            lighter_color = self._change_color_brightness(color, brightness_factor=0.7)
+            binary_mask = (soft_mask > 0.5).astype("uint8")
+            self._draw_text_in_mask(binary_mask, text, lighter_color)
         return self.output
 
     def draw_polygon(self, segment, color, edge_color=None, alpha=0.5):
@@ -1152,14 +1214,14 @@ class Visualizer:
         modified_lightness = 0.0 if modified_lightness < 0.0 else modified_lightness
         modified_lightness = 1.0 if modified_lightness > 1.0 else modified_lightness
         modified_color = colorsys.hls_to_rgb(polygon_color[0], modified_lightness, polygon_color[2])
-        return modified_color
+        return tuple(np.clip(modified_color, 0.0, 1.0))
 
     def _convert_boxes(self, boxes):
         """
         Convert different format of boxes to an NxB array, where B = 4 or 5 is the box dimension.
         """
         if isinstance(boxes, Boxes) or isinstance(boxes, RotatedBoxes):
-            return boxes.tensor.numpy()
+            return boxes.tensor.detach().numpy()
         else:
             return np.asarray(boxes)
 
@@ -1185,6 +1247,24 @@ class Visualizer:
             else:
                 ret.append(GenericMask(x, self.output.height, self.output.width))
         return ret
+
+    def _draw_text_in_mask(self, binary_mask, text, color):
+        """
+        Find proper places to draw text given a binary mask.
+        """
+        # TODO sometimes drawn on wrong objects. the heuristics here can improve.
+        _num_cc, cc_labels, stats, centroids = cv2.connectedComponentsWithStats(binary_mask, 8)
+        if stats[1:, -1].size == 0:
+            return
+        largest_component_id = np.argmax(stats[1:, -1]) + 1
+
+        # draw text on the largest component, as well as other very large components.
+        for cid in range(1, _num_cc):
+            if cid == largest_component_id or stats[cid, -1] > _LARGE_MASK_AREA_THRESH:
+                # median is more stable than centroid
+                # center = centroids[largest_component_id]
+                center = np.median((cc_labels == cid).nonzero(), axis=1)[::-1]
+                self.draw_text(text, center, color=color)
 
     def _convert_keypoints(self, keypoints):
         if isinstance(keypoints, Keypoints):

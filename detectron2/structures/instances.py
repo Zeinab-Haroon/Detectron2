@@ -1,5 +1,6 @@
 # Copyright (c) Facebook, Inc. and its affiliates.
 import itertools
+import warnings
 from typing import Any, Dict, List, Tuple, Union
 import torch
 
@@ -71,7 +72,8 @@ class Instances:
         The length of `value` must be the number of instances,
         and must agree with other existing fields in this object.
         """
-        data_len = len(value)
+        with warnings.catch_warnings(record=True):
+            data_len = len(value)
         if len(self._fields):
             assert (
                 len(self) == data_len
@@ -128,7 +130,7 @@ class Instances:
             If `item` is a string, return the data in the corresponding field.
             Otherwise, returns an `Instances` where all fields are indexed by `item`.
         """
-        if type(item) == int:
+        if type(item) is int:
             if item >= len(self) or item < -len(self):
                 raise IndexError("Instances index out of range!")
             else:
@@ -163,8 +165,9 @@ class Instances:
             return instance_lists[0]
 
         image_size = instance_lists[0].image_size
-        for i in instance_lists[1:]:
-            assert i.image_size == image_size
+        if not isinstance(image_size, torch.Tensor):  # could be a tensor in tracing
+            for i in instance_lists[1:]:
+                assert i.image_size == image_size
         ret = Instances(image_size)
         for k in instance_lists[0]._fields.keys():
             values = [i.get(k) for i in instance_lists]

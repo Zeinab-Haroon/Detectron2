@@ -7,6 +7,7 @@ from torch.nn import functional as F
 
 from detectron2.config import configurable
 from detectron2.layers import Conv2d, ConvTranspose2d, ShapeSpec, cat, get_norm
+from detectron2.layers.wrappers import move_device_like
 from detectron2.structures import Instances
 from detectron2.utils.events import get_event_storage
 from detectron2.utils.registry import Registry
@@ -86,7 +87,7 @@ def mask_rcnn_loss(pred_mask_logits: torch.Tensor, instances: List[Instances], v
         gt_masks_bool = gt_masks > 0.5
     gt_masks = gt_masks.to(dtype=torch.float32)
 
-    # Log the training accuracy (using gt classes and 0.5 threshold)
+    # Log the training accuracy (using gt classes and sigmoid(0.0) == 0.5 threshold)
     mask_incorrect = (pred_mask_logits > 0.0) != gt_masks_bool
     mask_accuracy = 1 - (mask_incorrect.sum().item() / max(mask_incorrect.numel(), 1.0))
     num_positive = gt_masks_bool.sum().item()
@@ -141,7 +142,12 @@ def mask_rcnn_inference(pred_mask_logits: torch.Tensor, pred_instances: List[Ins
         # Select masks corresponding to the predicted classes
         num_masks = pred_mask_logits.shape[0]
         class_pred = cat([i.pred_classes for i in pred_instances])
-        indices = torch.arange(num_masks, device=class_pred.device)
+        device = (
+            class_pred.device
+            if torch.jit.is_scripting()
+            else ("cpu" if torch.jit.is_tracing() else class_pred.device)
+        )
+        indices = move_device_like(torch.arange(num_masks, device=device), class_pred)
         mask_probs_pred = pred_mask_logits[indices, class_pred][:, None].sigmoid()
     # mask_probs_pred.shape: (B, 1, Hmask, Wmask)
 
@@ -158,15 +164,17 @@ class BaseMaskRCNNHead(nn.Module):
     """
 
     @configurable
-    def __init__(self, *, vis_period=0):
+    def __init__(self, *, loss_weight: float = 1.0, vis_period: int = 0):
         """
         NOTE: this interface is experimental.
 
         Args:
+            loss_weight (float): multiplier of the loss
             vis_period (int): visualization period
         """
         super().__init__()
         self.vis_period = vis_period
+        self.loss_weight = loss_weight
 
     @classmethod
     def from_config(cls, cfg, input_shape):
@@ -188,8 +196,7 @@ class BaseMaskRCNNHead(nn.Module):
         """
         x = self.layers(x)
         if self.training:
-            assert not torch.jit.is_scripting()
-            return {"loss_mask": mask_rcnn_loss(x, instances, self.vis_period)}
+            return {"loss_mask": mask_rcnn_loss(x, instances, self.vis_period) * self.loss_weight}
         else:
             mask_rcnn_inference(x, instances)
             return instances
@@ -218,7 +225,8 @@ class MaskRCNNConvUpsampleHead(BaseMaskRCNNHead, nn.Sequential):
 
         Args:
             input_shape (ShapeSpec): shape of the input feature
-            num_classes (int): the number of classes. 1 if using class agnostic prediction.
+            num_classes (int): the number of foreground classes (i.e. background is not
+                included). 1 if using class agnostic prediction.
             conv_dims (list[int]): a list of N>0 integers representing the output dimensions
                 of N-1 conv layers and the last upsample layer.
             conv_norm (str or callable): normalization for the conv layers.

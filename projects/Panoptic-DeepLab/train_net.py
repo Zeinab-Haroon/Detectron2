@@ -10,7 +10,6 @@ import os
 import torch
 
 import detectron2.data.transforms as T
-import detectron2.utils.comm as comm
 from detectron2.checkpoint import DetectionCheckpointer
 from detectron2.config import get_cfg
 from detectron2.data import MetadataCatalog, build_detection_train_loader
@@ -34,7 +33,9 @@ from detectron2.solver.build import maybe_add_gradient_clipping
 def build_sem_seg_train_aug(cfg):
     augs = [
         T.ResizeShortestEdge(
-            cfg.INPUT.MIN_SIZE_TRAIN, cfg.INPUT.MAX_SIZE_TRAIN, cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING
+            cfg.INPUT.MIN_SIZE_TRAIN,
+            cfg.INPUT.MAX_SIZE_TRAIN,
+            cfg.INPUT.MIN_SIZE_TRAIN_SAMPLING,
         )
     ]
     if cfg.INPUT.CROP.ENABLED:
@@ -59,6 +60,8 @@ class Trainer(DefaultTrainer):
         For your own dataset, you can simply create an evaluator manually in your
         script and do not have to worry about the hacky if-else logic here.
         """
+        if cfg.MODEL.PANOPTIC_DEEPLAB.BENCHMARK_NETWORK_SPEED:
+            return None
         if output_folder is None:
             output_folder = os.path.join(cfg.OUTPUT_DIR, "inference")
         evaluator_list = []
@@ -66,13 +69,20 @@ class Trainer(DefaultTrainer):
         if evaluator_type in ["cityscapes_panoptic_seg", "coco_panoptic_seg"]:
             evaluator_list.append(COCOPanopticEvaluator(dataset_name, output_folder))
         if evaluator_type == "cityscapes_panoptic_seg":
-            assert (
-                torch.cuda.device_count() >= comm.get_rank()
-            ), "CityscapesEvaluator currently do not work with multiple machines."
             evaluator_list.append(CityscapesSemSegEvaluator(dataset_name))
             evaluator_list.append(CityscapesInstanceEvaluator(dataset_name))
         if evaluator_type == "coco_panoptic_seg":
-            evaluator_list.append(COCOEvaluator(dataset_name, output_dir=output_folder))
+            # `thing_classes` in COCO panoptic metadata includes both thing and
+            # stuff classes for visualization. COCOEvaluator requires metadata
+            # which only contains thing classes, thus we map the name of
+            # panoptic datasets to their corresponding instance datasets.
+            dataset_name_mapper = {
+                "coco_2017_val_panoptic": "coco_2017_val",
+                "coco_2017_val_100_panoptic": "coco_2017_val_100",
+            }
+            evaluator_list.append(
+                COCOEvaluator(dataset_name_mapper[dataset_name], output_dir=output_folder)
+            )
         if len(evaluator_list) == 0:
             raise NotImplementedError(
                 "no Evaluator for the dataset {} with the type {}".format(
@@ -103,27 +113,22 @@ class Trainer(DefaultTrainer):
         """
         params = get_default_optimizer_params(
             model,
-            base_lr=cfg.SOLVER.BASE_LR,
             weight_decay=cfg.SOLVER.WEIGHT_DECAY,
             weight_decay_norm=cfg.SOLVER.WEIGHT_DECAY_NORM,
-            bias_lr_factor=cfg.SOLVER.BIAS_LR_FACTOR,
-            weight_decay_bias=cfg.SOLVER.WEIGHT_DECAY_BIAS,
         )
 
         optimizer_type = cfg.SOLVER.OPTIMIZER
         if optimizer_type == "SGD":
-            optimizer = torch.optim.SGD(
+            return maybe_add_gradient_clipping(cfg, torch.optim.SGD)(
                 params,
                 cfg.SOLVER.BASE_LR,
                 momentum=cfg.SOLVER.MOMENTUM,
                 nesterov=cfg.SOLVER.NESTEROV,
             )
         elif optimizer_type == "ADAM":
-            optimizer = torch.optim.Adam(params, cfg.SOLVER.BASE_LR)
+            return maybe_add_gradient_clipping(cfg, torch.optim.Adam)(params, cfg.SOLVER.BASE_LR)
         else:
             raise NotImplementedError(f"no optimizer type {optimizer_type}")
-        optimizer = maybe_add_gradient_clipping(cfg, optimizer)
-        return optimizer
 
 
 def setup(args):
@@ -155,7 +160,7 @@ def main(args):
     return trainer.train()
 
 
-if __name__ == "__main__":
+def invoke_main() -> None:
     args = default_argument_parser().parse_args()
     print("Command Line Args:", args)
     launch(
@@ -166,3 +171,7 @@ if __name__ == "__main__":
         dist_url=args.dist_url,
         args=(args,),
     )
+
+
+if __name__ == "__main__":
+    invoke_main()  # pragma: no cover
